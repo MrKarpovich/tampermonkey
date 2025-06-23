@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         GubkaBob AutoNext UI (FIXED)
-// @namespace    gubka-bob-autonext-ui
-// @version      1.0
-// @description  Автопереход, fullscreen, автозапуск и UI под "Желаем приятного просмотра"
+// @name         GubkaBob Fix: Чекбоксы + Автозапуск
+// @namespace    gubka-bob-autoplayer
+// @version      1.1
+// @description  Автозапуск, fullscreen, панель настроек снизу под плеером
 // @match        https://gubka-bob.top/sezon-*/**.html
 // @grant        none
 // @run-at       document-idle
@@ -17,7 +17,6 @@
         fullscreen: true,
         autoplay: true
     };
-
     const settings = loadSettings();
 
     function loadSettings() {
@@ -33,114 +32,153 @@
     }
 
     function createCheckbox(id, label, state, onChange) {
-        const labelElem = document.createElement("label");
-        labelElem.style.cssText = "margin: 5px 10px; display:inline-flex; align-items:center; gap:5px; font-size:14px; font-family:sans-serif;";
+        const wrapper = document.createElement("label");
+        wrapper.style.cssText = "margin: 4px 0; display:flex; align-items:center; gap:6px; font-size:13px; color:#000;";
+        wrapper.title = state ? "Активировано ✅" : "Отключено ❌";
+
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
-        checkbox.id = id;
         checkbox.checked = state;
-        checkbox.addEventListener("change", () => {
-            onChange(checkbox.checked);
-            saveSettings();
-        });
+        checkbox.style.cssText = "width: 16px; height: 16px; accent-color: #00f; cursor: pointer;";
+
+        const status = document.createElement("span");
+        status.textContent = state ? "✅" : "❌";
+        status.style.color = state ? "green" : "red";
+        status.style.fontWeight = "bold";
 
         const span = document.createElement("span");
         span.textContent = label;
 
-        labelElem.appendChild(checkbox);
-        labelElem.appendChild(span);
+        checkbox.addEventListener("change", () => {
+            const checked = checkbox.checked;
+            onChange(checked);
+            saveSettings();
+            status.textContent = checked ? "✅" : "❌";
+            status.style.color = checked ? "green" : "red";
+            wrapper.title = checked ? "Активировано ✅" : "Отключено ❌";
+        });
 
-        return labelElem;
+        wrapper.appendChild(checkbox);
+        wrapper.appendChild(status);
+        wrapper.appendChild(span);
+        return wrapper;
     }
 
     function insertSettingsPanel() {
-        const targetText = Array.from(document.querySelectorAll("*")).find(el => el.textContent?.includes("Желаем приятного просмотра"));
-        if (!targetText) {
-            console.warn("❌ Не удалось найти блок 'Желаем приятного просмотра'");
-            return;
-        }
+        const refBtn = document.querySelector(".knopka2"); // кнопка "Следующая"
+        if (!refBtn) return;
 
         const panel = document.createElement("div");
-        panel.style.cssText = "padding:10px;background:#f0f0f0;border-radius:5px;margin-top:10px;max-width:600px;font-family:sans-serif;font-size:14px;";
-        panel.innerHTML = "<strong>GubkaBob AutoNext:</strong><br>";
+        panel.id = "gubka-settings-panel";
+        panel.style.cssText = `
+            position: relative;
+            z-index: 9999;
+            margin-bottom: 10px;
+            background: #ffffffee;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 8px;
+            max-width: 300px;
+            font-family: sans-serif;
+            font-size: 14px;
+        `;
 
-        panel.appendChild(createCheckbox("autoNext", "Автопереход", settings.autoNext, (val) => {
-            settings.autoNext = val;
-        }));
+        panel.innerHTML = "<strong>⚙️ Настройки GubkaBob:</strong><br>";
 
-        panel.appendChild(createCheckbox("fullscreen", "Полный экран", settings.fullscreen, (val) => {
-            settings.fullscreen = val;
-        }));
+panel.appendChild(createCheckbox("autoNext", "Автопереход", settings.autoNext, function (val) {
+    settings.autoNext = val;
+}));
 
-        panel.appendChild(createCheckbox("autoplay", "Автозапуск", settings.autoplay, (val) => {
+panel.appendChild(createCheckbox("fullscreen", "Полный экран", settings.fullscreen, function (val) {
+    settings.fullscreen = val;
+}));
+
+        panel.appendChild(createCheckbox("autoplay", "Автозапуск", settings.autoplay, val => {
             settings.autoplay = val;
+            document.cookie = `autoplay=${val ? 1 : 0}; path=/; max-age=31536000`;
         }));
 
-        targetText.insertAdjacentElement("afterend", panel);
+        // Вставляем ПЕРЕД блоком с кнопками "Следующая / Предыдущая"
+        refBtn.parentElement.insertBefore(panel, refBtn);
+        console.log("✅ Панель настроек вставлена");
     }
 
-    function tryFullscreen(iframe) {
-        if (!iframe) return;
-        const req = iframe.requestFullscreen || iframe.webkitRequestFullscreen || iframe.mozRequestFullScreen || iframe.msRequestFullscreen;
-        if (req) {
-            req.call(iframe).catch(() => console.warn("❌ Не удалось включить fullscreen"));
+    function clickPlayButton() {
+        const btn = document.querySelector(".button_1_nBS");
+        if (btn) {
+            btn.click();
+            console.log("▶️ Кнопка 'Смотреть' нажата");
         }
     }
 
-    function tryAutoplayInsideIframe(iframe) {
-        try {
-            const innerDoc = iframe.contentDocument || iframe.contentWindow?.document;
-            const video = innerDoc?.querySelector("video");
-            if (video && video.paused) {
-                video.play().then(() => {
-                    console.log("▶️ Видео запущено");
-                }).catch(e => console.warn("❌ Автозапуск не сработал:", e));
+    function tryPostPlayMessage(retries = 10) {
+        const iframe = document.querySelector("iframe[src*='hdgo'], iframe[src*='vio.to'], iframe[src*='streamguard']");
+        if (iframe?.contentWindow) {
+            iframe.contentWindow.postMessage({ event: "play" }, "*");
+            console.log("📤 Сообщение play отправлено в iframe");
+        } else if (retries > 0) {
+            setTimeout(() => tryPostPlayMessage(retries - 1), 1000);
+        } else {
+            console.warn("⚠️ iframe недоступен для postMessage");
+        }
+    }
+
+    function clickFullscreenButton() {
+        const svgButtons = document.querySelectorAll("svg[viewBox='0 0 40 40']");
+        svgButtons.forEach(svg => {
+            const tooltip = svg.nextElementSibling?.textContent?.toLowerCase();
+            if (tooltip?.includes("полноэкранный")) {
+                const btn = svg.closest("button");
+                if (btn) {
+                    btn.click();
+                    console.log("🖥 Полноэкранный режим включен");
+                }
             }
-        } catch (e) {
-            console.warn("⚠️ Не удалось получить доступ к видео в iframe — возможно, CORS", e);
-        }
+        });
     }
 
-    function waitForIframeAndControl() {
-        const iframe = document.querySelector("iframe[src*='vio.to'], iframe[src*='streamguard']");
-        if (!iframe) {
-            console.warn("⏳ iframe не найден, повтор через 500мс...");
-            setTimeout(waitForIframeAndControl, 500);
+    function waitUntilReady() {
+        return document.querySelector(".watching-video iframe, .button_1_nBS, .knopka2");
+    }
+
+    function waitAndRun(retries = 15) {
+        if (!waitUntilReady()) {
+            if (retries > 0) {
+                return setTimeout(() => waitAndRun(retries - 1), 1000);
+            }
+            console.warn("⚠️ Плеер или кнопки не найдены");
             return;
         }
 
         insertSettingsPanel();
 
-        // немного подождём перед действиями
         setTimeout(() => {
-            if (settings.fullscreen) tryFullscreen(iframe);
-            if (settings.autoplay) tryAutoplayInsideIframe(iframe);
-        }, 2000);
+            if (settings.autoplay) {
+                clickPlayButton();
+                setTimeout(() => tryPostPlayMessage(), 1500);
+            }
+            if (settings.fullscreen) {
+                setTimeout(clickFullscreenButton, 3000);
+            }
+        }, 1000);
     }
 
-    function initListeners() {
-        window.addEventListener("message", (e) => {
+    function initAutoNext() {
+        window.addEventListener("message", e => {
             const data = e.data;
-            if (!data || typeof data !== "object") return;
-
-            if (data.event === "ended" && settings.autoNext) {
-                console.log("🎞️ Переход к следующей серии...");
+            if (data?.event === "ended" && settings.autoNext) {
                 const nextBtn = document.querySelector(".knopka2");
-                if (nextBtn?.href) window.location.href = nextBtn.href;
-            }
-
-            if (data.event === "inited") {
-                console.log("📺 Видео загружено (event: inited)");
-                const iframe = document.querySelector("iframe");
-                if (settings.autoplay) tryAutoplayInsideIframe(iframe);
-                if (settings.fullscreen) tryFullscreen(iframe);
+                if (nextBtn?.href) {
+                    console.log("⏭ Переход к следующей серии");
+                    window.location.href = nextBtn.href;
+                }
             }
         });
     }
 
-    // старт
+    // Задержка на 5 секунд
     setTimeout(() => {
-        waitForIframeAndControl();
-        initListeners();
-    }, 1000);
+        waitAndRun();
+        initAutoNext();
+    }, 5000);
 })();
